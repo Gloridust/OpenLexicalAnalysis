@@ -1,0 +1,22 @@
+{
+    "title_selectors": [
+        ".article-title",
+        "#post-title",
+        "h1.title"
+    ],
+    "author_selectors": [
+        ".author-name",
+        "#writer",
+        "span.byline"
+    ],
+    "date_selectors": [
+        ".publish-date",
+        "#post-date",
+        "time.entry-date"
+    ],
+    "content_selectors": [
+        ".article-body",
+        "#post-content",
+        "div.entry-content"
+    ]
+}
