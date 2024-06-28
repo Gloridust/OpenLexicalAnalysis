@@ -13,6 +13,7 @@ from concurrent.futures import ThreadPoolExecutor
 import logging
 import pickle
 from sklearn.cluster import KMeans
+import json
 
 class OpenLexicalAnalysis:
     def __init__(self):
