@@ -2,52 +2,70 @@ import requests
 from bs4 import BeautifulSoup
 from urllib.parse import urljoin
 import re
+import json
+import logging
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.naive_bayes import MultinomialNB
-import torch
-import torch.nn as nn
-import transformers
-import nltk
-from nltk.tokenize import sent_tokenize
-from concurrent.futures import ThreadPoolExecutor
-import logging
-import pickle
 from sklearn.cluster import KMeans
-import json
+import nltk
+from nltk.tokenize import word_tokenize, sent_tokenize
+from nltk.corpus import stopwords
+from nltk.stem import WordNetLemmatizer
+import numpy as np
+from collections import Counter
+
+# 下载必要的NLTK数据
+nltk.download('punkt')
+nltk.download('stopwords')
+nltk.download('wordnet')
 
 class OpenLexicalAnalysis:
     def __init__(self):
         self.config = self.load_config()
-        self.dl_model = self.load_dl_model()
-        self.structure_learner = self.load_structure_learner()
+        self.ml_model = self.train_ml_model()
+        self.structure_model = self.train_structure_model()
+        self.lemmatizer = WordNetLemmatizer()
+        self.stop_words = set(stopwords.words('english'))
         self.setup_logging()
-        nltk.download('punkt')
-
-    def load_config(self):
-        with open('config.json', 'r') as f:
-            return json.load(f)
-
-    def load_dl_model(self):
-        # 加载预训练的BERT模型用于文本分类
-        model = transformers.BertForSequenceClassification.from_pretrained('bert-base-uncased')
-        tokenizer = transformers.BertTokenizer.from_pretrained('bert-base-uncased')
-        return model, tokenizer
-
-    def load_structure_learner(self):
-        # 加载或初始化结构学习器
-        try:
-            with open('structure_learner.pkl', 'rb') as f:
-                return pickle.load(f)
-        except FileNotFoundError:
-            return KMeans(n_clusters=5)  # 假设我们有5种主要的内容类型
 
     def setup_logging(self):
         logging.basicConfig(filename='open_lexical_analysis.log', level=logging.INFO,
                             format='%(asctime)s - %(levelname)s - %(message)s')
 
+    def load_config(self):
+        try:
+            with open('config.json', 'r') as f:
+                return json.load(f)
+        except FileNotFoundError:
+            logging.error("Config file not found. Using default configuration.")
+            return {
+                "title_selectors": [".article-title", "#post-title", "h1.title"],
+                "author_selectors": [".author-name", "#writer", "span.byline"],
+                "date_selectors": [".publish-date", "#post-date", "time.entry-date"],
+                "content_selectors": [".article-body", "#post-content", "div.entry-content"]
+            }
+
+    def train_ml_model(self):
+        X = ["这是一个标题", "这是作者名", "2021-01-01", "这是正文内容..."]
+        y = ["title", "author", "date", "content"]
+        vectorizer = TfidfVectorizer()
+        X_vec = vectorizer.fit_transform(X)
+        model = MultinomialNB()
+        model.fit(X_vec, y)
+        return (vectorizer, model)
+
+    def train_structure_model(self):
+        # 这里使用K-means聚类作为示例
+        # 在实际应用中，你可能需要使用更复杂的模型和更多的训练数据
+        X = np.random.rand(100, 10)  # 假设我们有100个样本，每个样本有10个特征
+        kmeans = KMeans(n_clusters=5, random_state=42)
+        kmeans.fit(X)
+        return kmeans
+
     def analyze(self, url):
         try:
             response = requests.get(url)
+            response.raise_for_status()
             soup = BeautifulSoup(response.text, 'html.parser')
             
             result = {
@@ -58,25 +76,30 @@ class OpenLexicalAnalysis:
                 'images': self.extract_images(soup, url)
             }
             
-            result['content'] = self.clean_and_format_content(result['content'])
-            
+            result = self.clean_and_format(result)
             self.learn_structure(soup, result)
             
             self.print_results(result)
             return result
-        except Exception as e:
-            logging.error(f"Error analyzing {url}: {str(e)}")
-            raise
+        except requests.RequestException as e:
+            logging.error(f"Error fetching URL {url}: {str(e)}")
+            return None
 
     def extract_title(self, soup):
         candidates = []
         for selector in self.config['title_selectors']:
             element = soup.select_one(selector)
             if element:
-                candidates.append((element.text.strip(), self.classify_text(element.text.strip())))
+                candidates.append((element.text.strip(), 5))
 
         for h1 in soup.find_all('h1'):
-            candidates.append((h1.text.strip(), self.classify_text(h1.text.strip())))
+            candidates.append((h1.text.strip(), 4))
+
+        for element in soup.find_all(['h1', 'h2', 'title']):
+            text = element.text.strip()
+            vec = self.ml_model[0].transform([text])
+            if self.ml_model[1].predict(vec)[0] == 'title':
+                candidates.append((text, 3))
 
         return max(candidates, key=lambda x: x[1])[0] if candidates else "Title not found"
 
@@ -85,10 +108,18 @@ class OpenLexicalAnalysis:
         for selector in self.config['author_selectors']:
             element = soup.select_one(selector)
             if element:
-                candidates.append((element.text.strip(), self.classify_text(element.text.strip())))
+                candidates.append((element.text.strip(), 5))
 
         for element in soup.find_all(class_=re.compile('author', re.I)):
-            candidates.append((element.text.strip(), self.classify_text(element.text.strip())))
+            candidates.append((element.text.strip(), 4))
+        for element in soup.find_all(id=re.compile('author', re.I)):
+            candidates.append((element.text.strip(), 4))
+
+        for element in soup.find_all(['span', 'div', 'p']):
+            text = element.text.strip()
+            vec = self.ml_model[0].transform([text])
+            if self.ml_model[1].predict(vec)[0] == 'author':
+                candidates.append((text, 3))
 
         return max(candidates, key=lambda x: x[1])[0] if candidates else "Author not found"
 
@@ -97,11 +128,17 @@ class OpenLexicalAnalysis:
         for selector in self.config['date_selectors']:
             element = soup.select_one(selector)
             if element:
-                candidates.append((element.text.strip(), self.classify_text(element.text.strip())))
+                candidates.append((element.text.strip(), 5))
 
         date_pattern = r'\d{4}[-/]\d{1,2}[-/]\d{1,2}'
         for element in soup.find_all(text=re.compile(date_pattern)):
-            candidates.append((element.strip(), self.classify_text(element.strip())))
+            candidates.append((element.strip(), 4))
+
+        for element in soup.find_all(['span', 'div', 'time']):
+            text = element.text.strip()
+            vec = self.ml_model[0].transform([text])
+            if self.ml_model[1].predict(vec)[0] == 'date':
+                candidates.append((text, 3))
 
         return max(candidates, key=lambda x: x[1])[0] if candidates else "Date not found"
 
@@ -110,12 +147,18 @@ class OpenLexicalAnalysis:
         for selector in self.config['content_selectors']:
             element = soup.select_one(selector)
             if element:
-                candidates.append((element.text.strip(), self.classify_text(element.text.strip())))
+                candidates.append((element.text.strip(), 5))
 
         paragraphs = soup.find_all('p')
         if paragraphs:
             content = ' '.join([p.text.strip() for p in paragraphs])
-            candidates.append((content, self.classify_text(content)))
+            candidates.append((content, len(content)))
+
+        for element in soup.find_all(['div', 'article']):
+            text = element.text.strip()
+            vec = self.ml_model[0].transform([text])
+            if self.ml_model[1].predict(vec)[0] == 'content':
+                candidates.append((text, 3))
 
         return max(candidates, key=lambda x: x[1])[0] if candidates else "Content not found"
 
@@ -127,80 +170,72 @@ class OpenLexicalAnalysis:
                 images.append(full_url)
         return images
 
-    def classify_text(self, text):
-        # 使用BERT模型进行文本分类
-        inputs = self.dl_model[1](text, return_tensors="pt", truncation=True, padding=True)
-        outputs = self.dl_model[0](**inputs)
-        probabilities = torch.nn.functional.softmax(outputs.logits, dim=-1)
-        return probabilities[0].max().item()
+    def clean_and_format(self, result):
+        for key in ['title', 'author', 'date', 'content']:
+            if key in result:
+                result[key] = self.clean_text(result[key])
+        
+        # 将内容分成段落
+        if 'content' in result:
+            result['content'] = self.format_content(result['content'])
+        
+        return result
 
-    def clean_and_format_content(self, content):
-        # 使用NLTK进行句子分割
-        sentences = sent_tokenize(content)
-        # 简单的清理：移除多余的空白字符
-        cleaned_sentences = [re.sub(r'\s+', ' ', sentence).strip() for sentence in sentences]
-        # 将句子重新组合成段落
-        paragraphs = []
-        current_paragraph = []
-        for sentence in cleaned_sentences:
-            current_paragraph.append(sentence)
-            if len(' '.join(current_paragraph)) > 500:  # 假设每个段落约500字符
-                paragraphs.append(' '.join(current_paragraph))
-                current_paragraph = []
-        if current_paragraph:
-            paragraphs.append(' '.join(current_paragraph))
-        return '\n\n'.join(paragraphs)
+    def clean_text(self, text):
+        # 分词
+        words = word_tokenize(text.lower())
+        # 去除停用词和非字母字符
+        words = [word for word in words if word.isalpha() and word not in self.stop_words]
+        # 词形还原
+        words = [self.lemmatizer.lemmatize(word) for word in words]
+        return ' '.join(words)
+
+    def format_content(self, content):
+        # 将内容分成段落
+        paragraphs = content.split('\n')
+        # 去除空段落并清理每个段落
+        paragraphs = [self.clean_text(p) for p in paragraphs if p.strip()]
+        return paragraphs
 
     def learn_structure(self, soup, result):
-        # 提取页面结构特征
-        features = self.extract_structure_features(soup)
-        # 使用KMeans进行聚类
-        cluster = self.structure_learner.predict([features])[0]
+        # 这里我们使用一个非常简单的方法来"学习"网页结构
+        # 在实际应用中，你可能需要使用更复杂的方法
+        structure = {
+            'title_tag': soup.find(text=result['title']).parent.name,
+            'author_tag': soup.find(text=result['author']).parent.name,
+            'date_tag': soup.find(text=result['date']).parent.name,
+            'content_tags': Counter([p.parent.name for p in soup.find_all(text=result['content'])])
+        }
+        
         # 更新配置
-        self.update_config(cluster, result)
-        # 保存更新后的结构学习器
-        with open('structure_learner.pkl', 'wb') as f:
-            pickle.dump(self.structure_learner, f)
+        self.update_config(structure)
 
-    def extract_structure_features(self, soup):
-        # 这里只是一个简单的示例，你可以根据需要提取更多特征
-        return [
-            len(soup.find_all('div')),
-            len(soup.find_all('p')),
-            len(soup.find_all('h1')),
-            len(soup.find_all('h2')),
-            len(soup.find_all('img'))
-        ]
-
-    def update_config(self, cluster, result):
-        # 根据聚类结果和提取结果更新配置
-        # 这只是一个简单的示例，你可能需要更复杂的逻辑
-        if result['title'] not in self.config['title_selectors']:
-            self.config['title_selectors'].append(f"h1:contains('{result['title']}')")
-        # 对其他字段进行类似的更新...
+    def update_config(self, structure):
+        # 这里我们简单地将学到的结构添加到配置中
+        # 在实际应用中，你可能需要更复杂的逻辑来决定是否和如何更新配置
+        self.config['title_selectors'].append(structure['title_tag'])
+        self.config['author_selectors'].append(structure['author_tag'])
+        self.config['date_selectors'].append(structure['date_tag'])
+        self.config['content_selectors'].extend([tag for tag, count in structure['content_tags'].items() if count > 1])
+        
+        # 保存更新后的配置
         with open('config.json', 'w') as f:
             json.dump(self.config, f)
 
     def print_results(self, result):
+        logging.info("Extraction results:")
         print(f"Title: {result['title']}")
         print(f"Author: {result['author']}")
         print(f"Date: {result['date']}")
-        print(f"Content: {result['content'][:200]}...")  # 打印前200个字符
+        print("Content:")
+        for i, paragraph in enumerate(result['content'], 1):
+            print(f"Paragraph {i}: {paragraph[:100]}...")  # 打印每个段落的前100个字符
         print("Images:")
         for img in result['images']:
             print(f"- {img}")
 
-def parallel_analyze(urls):
-    analyzer = OpenLexicalAnalysis()
-    with ThreadPoolExecutor(max_workers=5) as executor:
-        return list(executor.map(analyzer.analyze, urls))
-
 
 if __name__ == "__main__":
-    urls = ["https://gloridust.xyz/%E6%8A%80%E6%9C%AF/2024/02/10/Job-submission-status-Check-tool.html", 
-            "https://x.com/gloridust1024/status/1805669956647866807"
-            ]
-    
-    results = parallel_analyze(urls)
-    for result in results:
-        print(result)
+    analyzer = OpenLexicalAnalysis()
+    url = "https://example.com/article"
+    results = analyzer.analyze(url)
