@@ -1,6 +1,5 @@
 import asyncio
 import aiohttp
-from urllib.parse import urlparse
 from webpage_fetcher import WebpageFetcher
 from content_extractor import ContentExtractor
 from data_cleaner import DataCleaner
@@ -15,9 +14,10 @@ class OpenLexicalAnalysis:
 
     async def analyze_url(self, url):
         try:
-            domain = urlparse(url).netloc
-            html_content = await self.fetcher.fetch(url)
-            raw_content = self.extractor.extract(html_content, domain)
+            content = await self.fetcher.fetch(url)
+            if content is None:
+                return None
+            raw_content = self.extractor.extract(content, url)
             cleaned_content = self.cleaner.clean(raw_content)
             self.outputter.output(cleaned_content)
             return cleaned_content
@@ -34,6 +34,7 @@ class OpenLexicalAnalysis:
 
 if __name__ == "__main__":
     urls = [
+        "https://gloridust.xyz/%E6%8A%80%E6%9C%AF/2024/02/10/Job-submission-status-Check-tool.html",
         "https://x.com/gloridust1024/status/1805669956647866807"
     ]
     

@@ -8,13 +8,12 @@ class DataCleaner:
         cleaned_content = content.copy()
 
         # Clean text
-        cleaned_content['text'] = self.clean_text(content['text'])
+        if 'text' in cleaned_content:
+            cleaned_content['text'] = self.clean_text(content['text'])
 
-        # Clean title
-        cleaned_content['title'] = self.clean_text(content['title'])
-
-        # Clean authors
-        cleaned_content['authors'] = [self.clean_text(author) for author in content['authors']]
+        # Clean author name
+        if 'author' in cleaned_content:
+            cleaned_content['author'] = self.clean_text(content['author'])
 
         return cleaned_content
 
@@ -24,8 +23,5 @@ class DataCleaner:
         
         # Remove URLs
         text = re.sub(r'http\S+', '', text)
-        
-        # Remove special characters
-        text = re.sub(r'[^\w\s]', '', text)
         
         return text

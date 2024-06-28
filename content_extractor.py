@@ -1,43 +1,65 @@
-from bs4 import BeautifulSoup
+import json
 import re
+from bs4 import BeautifulSoup
 
 class ContentExtractor:
-    def extract(self, content, domain):
+    def extract(self, content, url):
         if content is None:
             return None
 
-        article = content['article']
-        html = content['html']
-        soup = BeautifulSoup(html, 'html5lib')
+        if 'twitter.com' in url or 'x.com' in url:
+            return self.extract_twitter(content['html_content'], url)
+        else:
+            return self.extract_general(content['html_content'], url)
 
-        extracted_content = {
-            'url': article.url,
-            'title': article.title,
-            'authors': article.authors,
-            'publish_date': article.publish_date,
-            'text': article.text,
-            'top_image': article.top_image,
-            'images': article.images
+    def extract_twitter(self, html_content, url):
+        tweet_data = self.extract_tweet_data(html_content)
+        if not tweet_data:
+            return {"error": "Could not extract tweet data", "url": url}
+
+        return {
+            'url': url,
+            'author': tweet_data.get('user', {}).get('name'),
+            'username': tweet_data.get('user', {}).get('screen_name'),
+            'text': tweet_data.get('text', ''),
+            'date': tweet_data.get('created_at'),
+            'retweet_count': tweet_data.get('retweet_count'),
+            'favorite_count': tweet_data.get('favorite_count'),
+            'images': [media['media_url_https'] for media in tweet_data.get('entities', {}).get('media', []) if media['type'] == 'photo']
         }
 
-        # Domain-specific extraction
-        if 'twitter.com' in domain:
-            extracted_content.update(self.extract_twitter(soup))
-        elif 'news.ycombinator.com' in domain:
-            extracted_content.update(self.extract_hacker_news(soup))
+    def extract_tweet_data(self, html_content):
+        match = re.search(r'<script type="application/ld\+json".*?>(.*?)</script>', html_content, re.DOTALL)
+        if match:
+            try:
+                json_data = json.loads(match.group(1))
+                return json_data
+            except json.JSONDecodeError:
+                return None
+        return None
 
-        return extracted_content
+    def extract_general(self, html_content, url):
+        soup = BeautifulSoup(html_content, 'html.parser')
+        
+        title = soup.find('title')
+        title = title.text if title else "No title found"
 
-    def extract_twitter(self, soup):
-        tweet = soup.find('div', {'data-testid': 'tweetText'})
-        tweet_text = tweet.get_text() if tweet else ""
-        user = soup.find('div', {'data-testid': 'User-Name'})
-        username = user.get_text() if user else ""
-        return {'tweet_text': tweet_text, 'username': username}
+        author = soup.find('meta', {'name': 'author'})
+        author = author['content'] if author else "No author found"
 
-    def extract_hacker_news(self, soup):
-        title = soup.find('td', class_='title')
-        title_text = title.a.get_text() if title and title.a else ""
-        score = soup.find('span', class_='score')
-        score_text = score.get_text() if score else ""
-        return {'hn_title': title_text, 'hn_score': score_text}
+        date = soup.find('meta', {'property': 'article:published_time'})
+        date = date['content'] if date else "No date found"
+
+        content = soup.find('article') or soup.find('div', class_='content')
+        content = content.get_text(strip=True) if content else "No content found"
+
+        images = [img['src'] for img in soup.find_all('img') if 'src' in img.attrs]
+
+        return {
+            'url': url,
+            'title': title,
+            'author': author,
+            'date': date,
+            'content': content[:500] + "..." if len(content) > 500 else content,  # Truncate long content
+            'images': images[:5]  # Limit to first 5 images
+        }

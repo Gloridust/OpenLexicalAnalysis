@@ -1,5 +1,4 @@
 import aiohttp
-from newspaper import Article
 
 class WebpageFetcher:
     def __init__(self):
@@ -10,17 +9,13 @@ class WebpageFetcher:
             self.session = aiohttp.ClientSession()
         
         try:
-            async with self.session.get(url) as response:
+            headers = {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+            }
+            async with self.session.get(url, headers=headers) as response:
                 html_content = await response.text()
             
-            article = Article(url)
-            article.set_html(html_content)
-            article.parse()
-            
-            return {
-                'html': html_content,
-                'article': article
-            }
+            return {'url': url, 'html_content': html_content}
         except Exception as e:
             print(f"Error fetching {url}: {str(e)}")
             return None
