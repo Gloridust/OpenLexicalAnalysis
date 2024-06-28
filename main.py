@@ -1,3 +1,9 @@
+import requests
+from bs4 import BeautifulSoup
+from urllib.parse import urljoin
+import re
+from sklearn.feature_extraction.text import TfidfVectorizer
+from sklearn.naive_bayes import MultinomialNB
 import torch
 import torch.nn as nn
 import transformers
@@ -7,7 +13,6 @@ from concurrent.futures import ThreadPoolExecutor
 import logging
 import pickle
 from sklearn.cluster import KMeans
-import json
 
 class OpenLexicalAnalysis:
     def __init__(self):
