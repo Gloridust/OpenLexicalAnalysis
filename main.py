@@ -170,7 +170,6 @@ class OpenLexicalAnalysis:
             print(f"- {img}")
 
 
-# 使用示例
 if __name__ == "__main__":
     analyzer = OpenLexicalAnalysis()
     url = "https://gloridust.xyz/%E6%8A%80%E6%9C%AF/2024/02/10/Job-submission-status-Check-tool.html"
